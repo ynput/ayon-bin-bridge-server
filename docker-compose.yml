@@ -1,0 +1,104 @@
+version: "3.9"
+name: lakefs-with-prefect
+
+services:
+
+  ### Prefect Database
+  database:
+    image: postgres:15.2-alpine
+    container_name: database-prefect
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=prefect
+    volumes:
+      - ./lakeFsRootPath/database:/var/lib/postgresql/data
+    networks:
+      - prefect-network
+
+  ### Prefect Server API and UI
+  server:
+    image: prefecthq/prefect:2.10.17-python3.11
+    container_name: server-prefect
+    restart: always
+    volumes:
+      - ./lakeFsRootPath/prefect:/root/.prefect
+    entrypoint: ["/opt/prefect/entrypoint.sh", "prefect", "server", "start"]
+    environment:
+      - PREFECT_UI_URL=http://localhost:4200
+      - PREFECT_API_URL=http://localhost:4200/api
+      - PREFECT_SERVER_API_HOST=0.0.0.0
+      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://postgres:postgres@database:5432/prefect
+    ports:
+      - 4200:4200
+    depends_on:
+      - database
+    networks:
+      - prefect-network
+
+  ### Prefect Agent
+  agent:
+    image: prefecthq/prefect:2.10.17-python3.11
+    container_name: agent-prefect
+    restart: always
+    entrypoint: ["/opt/prefect/entrypoint.sh", "prefect", "agent", "start", "-q", "YOUR_WORK_QUEUE_NAME"]
+    environment:
+      - PREFECT_API_URL=http://server:4200/api
+    depends_on:
+      - server
+    networks:
+      - prefect-network
+
+  ### Prefect CLI
+  cli:
+    image: prefecthq/prefect:2.10.17-python3.11
+    container_name: cli-prefect
+    entrypoint: "bash"
+    working_dir: "/root/flows"
+    volumes:
+      - ./lakeFsRootPath/flows:/root/flows
+    environment:
+      - PREFECT_API_URL=http://server:4200/api
+    networks:
+      - prefect-network
+
+  ### lakeFS
+  lakefs:
+    image: treeverse/lakefs:1
+    container_name: lakefs
+    ports:
+      - "58000:8000"
+    environment:
+      - LAKEFS_DATABASE_TYPE=local
+      - LAKEFS_BLOCKSTORE_TYPE=local
+      - LAKEFS_AUTH_ENCRYPT_SECRET_KEY=some random secret string
+      - LAKEFS_LOGGING_LEVEL=INFO
+      - LAKEFS_STATS_ENABLED=${LAKEFS_STATS_ENABLED:-1}
+      - LAKEFS_INSTALLATION_USER_NAME=everything-bagel
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=AKIAIOSFOLKFSSAMPLES
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+      - LAKECTL_SERVER_ENDPOINT_URL=http://localhost:8000
+    volumes:
+      - ./lakeFsRootPath/lakefs:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+        - |
+          lakefs run --local-settings &
+          echo "---- lakeFS is starting ----"
+          wait-for -t 60 lakefs:8000
+          echo "------------------------------------------------"
+          echo "      lakeFS Web UI: http://127.0.0.1:58000/"
+          echo "------------------------------------------------"
+          wait
+    networks:
+      - prefect-network
+
+volumes:
+  prefect:
+  db:
+
+networks:
+  prefect-network:
+    driver: bridge
+
