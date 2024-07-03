@@ -1,1 +1,4 @@
-lakeFsRootPath/
+lake_db/
+lake_data/
+lake_confs/
+lakeFsRootPath
